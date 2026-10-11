@@ -1275,7 +1275,12 @@ public final class ChatListNode: ListViewImpl {
     private var theme: PresentationTheme
     
     private let viewProcessingQueue = Queue()
-    private var chatListView: ChatListNodeView?
+    private var chatListView: ChatListNodeView? {
+        didSet {
+            self.chatListViewUpdated?()
+        }
+    }
+    var chatListViewUpdated: (() -> Void)?
     public var entriesCount: Int {
         if let chatListView = self.chatListView {
             return chatListView.filteredEntries.count
@@ -1305,6 +1310,35 @@ public final class ChatListNode: ListViewImpl {
     private var enqueuedTransition: (ChatListNodeListViewTransition, () -> Void)?
     
     public private(set) var currentState: ChatListNodeState
+
+    // The chats of the current list, top to bottom, for the pinch grid.
+    var pinchGridItems: [ChatListPinchGridNode.Item] {
+        guard let view = self.chatListView else {
+            return []
+        }
+        let timestamp = Int32(Date().timeIntervalSince1970)
+        return view.originalList.items.sorted(by: { $0.index > $1.index }).compactMap { item -> ChatListPinchGridNode.Item? in
+            guard let peer = item.renderedPeer.chatMainPeer else {
+                return nil
+            }
+            var isOnline = false
+            if case let .user(user) = peer, user.botInfo == nil, let presence = item.presence, case let .present(until) = presence.status {
+                isOnline = until > timestamp
+            }
+            return ChatListPinchGridNode.Item(peer: peer, unreadCount: item.readCounters?.count ?? 0, isMuted: item.isMuted, isOnline: isOnline)
+        }
+    }
+
+    // Avatar frames of the rows currently on screen, in the coordinates of `node`.
+    func pinchGridListFrames(in node: ASDisplayNode) -> [EnginePeer.Id: CGRect] {
+        var result: [EnginePeer.Id: CGRect] = [:]
+        self.forEachItemNode { itemNode in
+            if let itemNode = itemNode as? ChatListItemNode, let item = itemNode.item, case let .peer(peerData) = item.content, let peer = peerData.peer.chatMainPeer {
+                result[peer.id] = itemNode.avatarNode.view.convert(itemNode.avatarNode.bounds, to: node.view)
+            }
+        }
+        return result
+    }
     private let statePromise: ValuePromise<ChatListNodeState>
     public var state: Signal<ChatListNodeState, NoError> {
         return self.statePromise.get()

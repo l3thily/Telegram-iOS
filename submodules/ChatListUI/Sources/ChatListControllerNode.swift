@@ -1158,6 +1158,11 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
     private let animationRenderer: MultiAnimationRenderer
     
     let mainContainerNode: ChatListContainerNode
+
+    // Grid mode lasts until the app is restarted.
+    private static var isPinchGridEnabled = false
+    private var pinchGridNode: ChatListPinchGridNode?
+    private var pinchStartProgress: CGFloat = 0.0
     
     var effectiveContainerNode: ChatListContainerNode {
         if let inlineStackContainerNode = self.inlineStackContainerNode {
@@ -1359,6 +1364,91 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         self.tapRecognizer = tapRecognizer
         self.view.addGestureRecognizer(tapRecognizer)
         tapRecognizer.isEnabled = false
+
+        self.view.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(self.pinchGesture(_:))))
+    }
+
+    private func makePinchGridNode() -> ChatListPinchGridNode {
+        if let current = self.pinchGridNode {
+            return current
+        }
+        let gridNode = ChatListPinchGridNode(context: self.context, presentationData: self.presentationData)
+        gridNode.openPeer = { [weak self] peer in
+            self?.mainContainerNode.currentItemNode.peerSelected?(peer, nil, true, true, nil)
+        }
+        gridNode.progressUpdated = { [weak self] progress in
+            self?.mainContainerNode.alpha = 1.0 - min(1.0, progress * 1.4)
+        }
+        self.insertSubnode(gridNode, aboveSubnode: self.mainContainerNode)
+        self.pinchGridNode = gridNode
+        self.mainContainerNode.currentItemNode.chatListViewUpdated = { [weak self] in
+            self?.updatePinchGrid()
+        }
+        return gridNode
+    }
+
+    private func updatePinchGrid() {
+        guard let gridNode = self.pinchGridNode, let (layout, navigationBarHeight, _, _, _) = self.containerLayout else {
+            return
+        }
+        let listNode = self.mainContainerNode.currentItemNode
+        gridNode.frame = CGRect(origin: CGPoint(), size: layout.size)
+        gridNode.update(items: listNode.pinchGridItems, listFrames: listNode.pinchGridListFrames(in: gridNode), size: layout.size, insets: UIEdgeInsets(top: navigationBarHeight, left: 0.0, bottom: layout.intrinsicInsets.bottom, right: 0.0), presentationData: self.presentationData)
+    }
+
+    private func removePinchGrid() {
+        self.pinchGridNode?.removeFromSupernode()
+        self.pinchGridNode = nil
+        self.mainContainerNode.alpha = 1.0
+        self.mainContainerNode.currentItemNode.chatListViewUpdated = nil
+    }
+
+    @objc private func pinchGesture(_ recognizer: UIPinchGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            if self.isReorderingFilters || self.mainContainerNode.currentItemNode.currentState.editing {
+                recognizer.state = .cancelled
+                return
+            }
+            let gridNode = self.makePinchGridNode()
+            gridNode.stopAnimation()
+            self.updatePinchGrid()
+            self.pinchStartProgress = gridNode.progress
+            gridNode.setProgress(gridNode.progress)
+        case .changed:
+            guard let gridNode = self.pinchGridNode else {
+                return
+            }
+            let progress: CGFloat
+            if self.pinchStartProgress < 0.5 {
+                progress = max(0.0, min(1.0, (1.0 - recognizer.scale) * 2.4))
+            } else {
+                progress = max(0.0, min(1.0, 1.0 - (recognizer.scale - 1.0) * 1.8))
+            }
+            gridNode.setProgress(progress)
+        case .ended, .cancelled:
+            guard let gridNode = self.pinchGridNode else {
+                return
+            }
+            let velocity = -recognizer.velocity * (self.pinchStartProgress < 0.5 ? 2.4 : 1.8)
+            let target: CGFloat
+            if abs(velocity) > 1.0 {
+                target = velocity > 0.0 ? 1.0 : 0.0
+            } else {
+                target = gridNode.progress > 0.5 ? 1.0 : 0.0
+            }
+            ChatListControllerNode.isPinchGridEnabled = target == 1.0
+            gridNode.animateProgress(to: target, velocity: velocity, completion: { [weak self] in
+                if target == 0.0 {
+                    self?.removePinchGrid()
+                }
+            })
+            if target == 1.0 {
+                HapticFeedback().impact(.light)
+            }
+        default:
+            break
+        }
     }
     
     @objc private func tapGesture(_ recognizer: UITapGestureRecognizer) {
@@ -1985,6 +2075,13 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         self.controller?.presentationContext.containerLayoutUpdated(childrenLayout, transition: transition)
         
         transition.updateFrame(node: self.mainContainerNode, frame: CGRect(origin: CGPoint(), size: layout.size))
+        if self.pinchGridNode != nil {
+            self.updatePinchGrid()
+        } else if ChatListControllerNode.isPinchGridEnabled {
+            let gridNode = self.makePinchGridNode()
+            self.updatePinchGrid()
+            gridNode.setProgress(1.0)
+        }
         var mainNavigationBarHeight = navigationBarHeight
         var cleanMainNavigationBarHeight = cleanNavigationBarHeight
         var mainInsets = insets
