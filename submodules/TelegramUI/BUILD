@@ -392,6 +392,7 @@ swift_library(
         "//submodules/TelegramUI/Components/Chat/ChatMessageSwipeToReplyNode",
         "//submodules/TelegramUI/Components/Chat/ChatMessageSelectionNode",
         "//submodules/TelegramUI/Components/Chat/ChatMessageDeliveryFailedNode",
+        "//submodules/TelegramUI/Components/Chat/ChatHistoryScrollMapNode",
         "//submodules/TelegramUI/Components/Chat/ChatMessageShareButton",
         "//submodules/TelegramUI/Components/Chat/ChatMessageThreadInfoNode",
         "//submodules/TelegramUI/Components/Chat/ChatMessageActionButtonsNode",

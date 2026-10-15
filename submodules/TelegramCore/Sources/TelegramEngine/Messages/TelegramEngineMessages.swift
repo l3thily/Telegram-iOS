@@ -322,6 +322,14 @@ public extension TelegramEngine {
             return _internal_appendTodoMessageItems(account: self.account, messageId: messageId, items: items)
         }
         
+        public func messageHistoryOverview(peerId: PeerId, sampleCount: Int = 48) -> Signal<EngineMessageHistoryOverview?, NoError> {
+            return _internal_messageHistoryOverview(account: self.account, peerId: peerId, sampleCount: sampleCount)
+        }
+        
+        public func messageHistoryMentions(peerId: PeerId, limit: Int32 = 100) -> Signal<[EngineMessageHistoryMention], NoError> {
+            return _internal_messageHistoryMentions(account: self.account, peerId: peerId, limit: limit)
+        }
+        
         public func earliestUnseenPersonalMentionMessage(peerId: PeerId, threadId: Int64?) -> Signal<EarliestUnseenPersonalMentionMessageResult, NoError> {
             let account = self.account
             return _internal_earliestUnseenPersonalMentionMessage(account: self.account, peerId: peerId, threadId: threadId)

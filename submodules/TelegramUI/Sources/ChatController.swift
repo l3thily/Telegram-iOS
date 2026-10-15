@@ -516,6 +516,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     weak var themeScreen: ChatThemeScreen?
     
     weak var currentPinchController: PinchController?
+    var scrollMapController: ChatHistoryScrollMapController?
     weak var currentPinchSourceItemNode: ListViewItemNode?
     
     var screenCaptureManager: ScreenCaptureDetectionManager?

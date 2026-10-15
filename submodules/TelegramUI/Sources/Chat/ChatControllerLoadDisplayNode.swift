@@ -5045,6 +5045,8 @@ extension ChatControllerImpl {
     }
     
     func setupChatHistoryNode(historyNode: ChatHistoryListNodeImpl) {
+        self.setupScrollMap(historyNode: historyNode)
+        
         self.historyStateDisposable?.dispose()
         self.historyStateDisposable = historyNode.historyState.get().startStrict(next: { [weak self] state in
             if let strongSelf = self {
@@ -5675,6 +5677,8 @@ extension ChatControllerImpl {
             guard let strongSelf = self else {
                 return
             }
+            
+            strongSelf.scrollMapController?.historyDidScroll()
 
             //print("didScrollWithOffset offset: \(offset), itemNode: \(String(describing: itemNode))")
             

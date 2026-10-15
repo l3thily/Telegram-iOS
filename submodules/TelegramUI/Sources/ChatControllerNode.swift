@@ -75,6 +75,7 @@ import RichTextEditorUIKit
 import RichTextEditorMediaView
 import InstantPageUI
 import ChatRichTextEditorComposer
+import ChatHistoryScrollMapNode
 
 final class VideoNavigationControllerDropContentItem: NavigationControllerDropContentItem {
     let itemNode: OverlayMediaItemNode
@@ -292,6 +293,16 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     private var inputMediaNodeStateContext = ChatEntityKeyboardInputNode.StateContext()
         
     let navigateButtons: ChatHistoryNavigationButtons
+    var scrollMapNode: ChatHistoryScrollMapNode? {
+        didSet {
+            if oldValue !== self.scrollMapNode {
+                oldValue?.removeFromSupernode()
+                if let scrollMapNode = self.scrollMapNode {
+                    self.contentContainerNode.contentNode.insertSubnode(scrollMapNode, belowSubnode: self.navigateButtons)
+                }
+            }
+        }
+    }
     
     private var ignoreUpdateHeight = false
     private var overrideUpdateTextInputHeightTransition: ContainedViewLayoutTransition?
@@ -2806,6 +2817,14 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         self.inputPanelBottomBackgroundSeparatorBaseOffset = intrinsicInputPanelBackgroundNodeSize.height
         
         transition.updateFrame(node: self.navigateButtons, frame: apparentNavigateButtonsFrame)
+        if let scrollMapNode = self.scrollMapNode {
+            // Between the top bar and the navigation buttons, along the right edge of the history.
+            let mapWidth: CGFloat = 220.0
+            let mapTop = insets.top + 16.0
+            let mapFrame = CGRect(x: layout.size.width - layout.safeInsets.right - mapWidth, y: mapTop, width: mapWidth, height: max(0.0, apparentNavigateButtonsFrame.minY - 16.0 - mapTop))
+            transition.updateFrame(node: scrollMapNode, frame: mapFrame)
+            scrollMapNode.updateLayout(size: mapFrame.size, transition: transition)
+        }
         self.navigateButtons.update(rect: apparentNavigateButtonsFrame, within: layout.size, transition: transition)
         
         if let secondaryInputPanelNode = self.secondaryInputPanelNode, let apparentSecondaryInputPanelFrame = apparentSecondaryInputPanelFrame, !secondaryInputPanelNode.frame.equalTo(apparentSecondaryInputPanelFrame) {
