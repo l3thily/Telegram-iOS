@@ -71,6 +71,7 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
     private var insets = UIEdgeInsets()
     // Avatar frames of the items in the list, in this node's coordinates.
     private var listFrames: [EnginePeer.Id: CGRect] = [:]
+    private var transitionFrames: [EnginePeer.Id: (from: CGRect, to: CGRect)] = [:]
 
     private(set) var progress: CGFloat = 0.0
     private var displayLink: CADisplayLink?
@@ -139,10 +140,15 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
             self.cellNodes.removeValue(forKey: id)
         }
         self.items = items
+        self.transitionFrames.removeAll(keepingCapacity: true)
+        for (index, item) in items.enumerated() {
+            self.transitionFrames[item.peer.id] = (self.listFrame(index: index, peerId: item.peer.id), self.gridFrame(index: index))
+        }
 
         self.scrollNode.frame = CGRect(origin: CGPoint(), size: size)
         let rows = (items.count + ChatListPinchGridNode.columns - 1) / ChatListPinchGridNode.columns
         self.scrollNode.view.contentSize = CGSize(width: size.width, height: insets.top + CGFloat(rows) * ChatListPinchGridNode.rowHeight + insets.bottom + 12.0)
+        self.layoutCellContents()
         self.layoutCells()
     }
 
@@ -206,38 +212,18 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
         return anchor.1.offsetBy(dx: 0.0, dy: CGFloat(index - anchor.0) * rowHeight)
     }
 
-    private func layoutCells() {
-        let p = self.progress
-        let scrollOffset = self.scrollNode.view.contentOffset.y
-        let detailsAlpha = max(0.0, min(1.0, (p - 0.55) / 0.45))
+    // Text measurement, avatar layout and badge geometry do not depend on gesture progress.
+    // Keep them off the display-link/touch hot path: only transforms/positions/opacity animate.
+    private func layoutCellContents() {
         let cellWidth = floor((self.size.width - 16.0) / CGFloat(ChatListPinchGridNode.columns))
-
-        for (index, item) in self.items.enumerated() {
-            guard let cellNode = self.cellNodes[item.peer.id] else {
-                continue
-            }
-            // List frames are in screen space; the grid scrolls, so convert them into content space.
-            let from = self.listFrame(index: index, peerId: item.peer.id).offsetBy(dx: 0.0, dy: scrollOffset)
-            let to = self.gridFrame(index: index)
-            let frame = CGRect(
-                x: from.minX + (to.minX - from.minX) * p,
-                y: from.minY + (to.minY - from.minY) * p,
-                width: from.width + (to.width - from.width) * p,
-                height: from.height + (to.height - from.height) * p
-            )
+        for item in self.items {
+            guard let cellNode = self.cellNodes[item.peer.id] else { continue }
             let avatarSize = ChatListPinchGridNode.avatarSize
-            cellNode.frame = CGRect(x: frame.midX - cellWidth * 0.5, y: frame.minY, width: cellWidth, height: avatarSize + 24.0)
-            let scale = frame.width / avatarSize
+            cellNode.bounds = CGRect(x: 0.0, y: 0.0, width: cellWidth, height: avatarSize + 24.0)
             cellNode.avatarNode.updateSize(size: CGSize(width: avatarSize, height: avatarSize))
             cellNode.avatarNode.bounds = CGRect(origin: CGPoint(), size: CGSize(width: avatarSize, height: avatarSize))
-            cellNode.avatarNode.position = CGPoint(x: cellWidth * 0.5, y: frame.height * 0.5)
-            cellNode.avatarNode.transform = CATransform3DMakeScale(scale, scale, 1.0)
-            // Rows that start off screen fade in as they flow into the grid.
-            cellNode.alpha = self.listFrames[item.peer.id] == nil ? p : 1.0
-
             let titleSize = cellNode.titleNode.updateLayout(CGSize(width: cellWidth - 4.0, height: 20.0))
             cellNode.titleNode.frame = CGRect(x: floor((cellWidth - titleSize.width) * 0.5), y: avatarSize + 6.0, width: titleSize.width, height: titleSize.height)
-            cellNode.titleNode.alpha = detailsAlpha
 
             let avatarFrame = CGRect(x: cellWidth * 0.5 - avatarSize * 0.5, y: 0.0, width: avatarSize, height: avatarSize)
             if !cellNode.badgeTextNode.isHidden {
@@ -247,9 +233,38 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
                 cellNode.badgeBackgroundNode.frame = badgeFrame
                 cellNode.badgeTextNode.frame = CGRect(x: badgeFrame.midX - textSize.width * 0.5, y: badgeFrame.midY - textSize.height * 0.5, width: textSize.width, height: textSize.height)
             }
+            cellNode.onlineNode.frame = CGRect(x: avatarFrame.maxX - 17.0, y: avatarFrame.maxY - 17.0, width: 16.0, height: 16.0)
+            // Prepare text before it fades in halfway through the gesture.
+            cellNode.titleNode.recursivelyEnsureDisplaySynchronously(true)
+            if !cellNode.badgeTextNode.isHidden {
+                cellNode.badgeTextNode.recursivelyEnsureDisplaySynchronously(true)
+            }
+        }
+    }
+
+    private func layoutCells() {
+        let p = self.progress
+        let scrollOffset = self.scrollNode.view.contentOffset.y
+        let detailsAlpha = max(0.0, min(1.0, (p - 0.55) / 0.45))
+        for item in self.items {
+            guard let cellNode = self.cellNodes[item.peer.id], let frames = self.transitionFrames[item.peer.id] else { continue }
+            let from = frames.from.offsetBy(dx: 0.0, dy: scrollOffset)
+            let to = frames.to
+            let frame = CGRect(
+                x: from.minX + (to.minX - from.minX) * p,
+                y: from.minY + (to.minY - from.minY) * p,
+                width: from.width + (to.width - from.width) * p,
+                height: from.height + (to.height - from.height) * p
+            )
+            let avatarSize = ChatListPinchGridNode.avatarSize
+            cellNode.position = CGPoint(x: frame.midX, y: frame.minY + (avatarSize + 24.0) * 0.5)
+            cellNode.avatarNode.position = CGPoint(x: cellWidth * 0.5, y: frame.height * 0.5)
+            let scale = frame.width / avatarSize
+            cellNode.avatarNode.transform = CATransform3DMakeScale(scale, scale, 1.0)
+            cellNode.alpha = self.listFrames[item.peer.id] == nil ? p : 1.0
+            cellNode.titleNode.alpha = detailsAlpha
             cellNode.badgeBackgroundNode.alpha = detailsAlpha
             cellNode.badgeTextNode.alpha = detailsAlpha
-            cellNode.onlineNode.frame = CGRect(x: avatarFrame.maxX - 17.0, y: avatarFrame.maxY - 17.0, width: 16.0, height: 16.0)
             cellNode.onlineNode.alpha = detailsAlpha
         }
     }
