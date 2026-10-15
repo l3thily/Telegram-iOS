@@ -5381,6 +5381,8 @@ extension ChatControllerImpl {
                 return
             }
 
+            strongSelf.scrollMapController?.historyDidScroll()
+
             var minOffsetForNavigation: CGFloat = 40.0
             strongSelf.chatDisplayNode.historyNode.enumerateItemNodes { itemNode in
                 if let itemNode = itemNode as? ChatMessageBubbleItemNode {

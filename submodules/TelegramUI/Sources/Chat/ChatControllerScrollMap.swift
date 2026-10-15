@@ -15,6 +15,15 @@ import ChatControllerInteraction
 // while the history scrolls and hides it 1.5 s after scrolling stops.
 final class ChatHistoryScrollMapController {
     static let minimumMessageCount: Int32 = 200
+
+    // The overview takes 48 history requests, which can take several seconds; reopening a chat shows
+    // the last one at once and refreshes it in the background.
+    private struct CachedData {
+        let overview: EngineMessageHistoryOverview
+        let mentions: [EngineMessageHistoryMention]
+        let timestamp: TimeInterval
+    }
+    private static var cache: [String: CachedData] = [:]
     private static let hideDelay: Double = 1.5
 
     private weak var chatController: ChatControllerImpl?
@@ -62,6 +71,12 @@ final class ChatHistoryScrollMapController {
             }
         }
 
+        let cacheKey = "\(context.account.id.int64):\(peerId.toInt64())"
+        if let cached = ChatHistoryScrollMapController.cache[cacheKey], Date().timeIntervalSince1970 - cached.timestamp < 300.0 {
+            self.overview = cached.overview
+            self.updateContent(overview: cached.overview, mentions: cached.mentions)
+        }
+
         self.dataDisposable = (combineLatest(queue: .mainQueue(),
             context.engine.messages.messageHistoryOverview(peerId: peerId),
             context.engine.messages.messageHistoryMentions(peerId: peerId)
@@ -69,6 +84,11 @@ final class ChatHistoryScrollMapController {
         |> deliverOnMainQueue).startStrict(next: { [weak self] overview, mentions in
             guard let self, let overview else {
                 return
+            }
+            ChatHistoryScrollMapController.cache[cacheKey] = CachedData(overview: overview, mentions: mentions, timestamp: Date().timeIntervalSince1970)
+            // Retain only a small, recent set of chats for the lifetime of this process.
+            if ChatHistoryScrollMapController.cache.count > 16, let oldestKey = ChatHistoryScrollMapController.cache.min(by: { $0.value.timestamp < $1.value.timestamp })?.key {
+                ChatHistoryScrollMapController.cache.removeValue(forKey: oldestKey)
             }
             self.overview = overview
             self.updateContent(overview: overview, mentions: mentions)
