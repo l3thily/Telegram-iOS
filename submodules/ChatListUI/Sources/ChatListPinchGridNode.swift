@@ -77,6 +77,7 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
     private var springTarget: CGFloat = 0.0
     private var springVelocity: CGFloat = 0.0
     private var springCompletion: (() -> Void)?
+    private var lastSpringTimestamp: Double?
 
     var openPeer: ((EnginePeer) -> Void)?
     var progressUpdated: ((CGFloat) -> Void)?
@@ -273,6 +274,7 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
         self.springTarget = target
         self.springVelocity = velocity
         self.springCompletion = completion
+        self.lastSpringTimestamp = nil
         if self.displayLink == nil {
             let displayLink = CADisplayLink(target: DisplayLinkTarget { [weak self] link in
                 self?.springStep(link)
@@ -287,20 +289,30 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
         self.displayLink?.invalidate()
         self.displayLink = nil
         self.springCompletion = nil
+        self.lastSpringTimestamp = nil
     }
 
     private func springStep(_ link: CADisplayLink) {
-        let dt = CGFloat(min(1.0 / 30.0, max(1.0 / 240.0, link.targetTimestamp - link.timestamp)))
+        // Integrate actual elapsed time: a simulator or busy display can skip callbacks even when
+        // preferredFrameRateRange asks for 120 Hz. Small substeps keep the spring stable after a gap.
+        var remaining = CGFloat(min(0.1, max(1.0 / 240.0, self.lastSpringTimestamp.map { link.timestamp - $0 } ?? (link.targetTimestamp - link.timestamp))))
+        self.lastSpringTimestamp = link.timestamp
         let stiffness: CGFloat = 320.0
         let damping: CGFloat = 24.0
-        let displacement = self.progress - self.springTarget
-        let acceleration = -stiffness * displacement - damping * self.springVelocity
-        self.springVelocity += acceleration * dt
-        var progress = self.progress + self.springVelocity * dt
+        var progress = self.progress
+        while remaining > 0.0 {
+            let dt = min(1.0 / 120.0, remaining)
+            let displacement = progress - self.springTarget
+            let acceleration = -stiffness * displacement - damping * self.springVelocity
+            self.springVelocity += acceleration * dt
+            progress += self.springVelocity * dt
+            remaining -= dt
+        }
         if abs(progress - self.springTarget) < 0.001 && abs(self.springVelocity) < 0.01 {
             progress = self.springTarget
             self.displayLink?.invalidate()
             self.displayLink = nil
+            self.lastSpringTimestamp = nil
             self.setProgress(progress)
             let completion = self.springCompletion
             self.springCompletion = nil
