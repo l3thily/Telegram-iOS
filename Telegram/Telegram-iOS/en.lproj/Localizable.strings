@@ -1300,6 +1300,14 @@
 "FeatureDisabled.Oops" = "Oops";
 
 "Conversation.ContextMenuReply" = "Reply";
+"Conversation.ContextMenuRemindMe" = "Remind Me";
+"Conversation.RemindMe.InOneHour" = "In 1 Hour";
+"Conversation.RemindMe.ThisEvening" = "This Evening";
+"Conversation.RemindMe.Tomorrow" = "Tomorrow";
+"Conversation.RemindMe.Custom" = "Custom…";
+"Conversation.RemindMe.Remove" = "Remove Reminder";
+"Conversation.RemindMe.Set" = "Reminder set for %@";
+"Conversation.RemindMe.Removed" = "Reminder removed";
 
 "ForwardedMessages_1" = "Forwarded message";
 "ForwardedMessages_2" = "2 forwarded messages";

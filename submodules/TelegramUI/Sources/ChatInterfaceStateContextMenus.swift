@@ -1200,6 +1200,20 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             })))
         }
         
+        if messages.count == 1, let chatController = interfaceInteraction.chatController() as? ChatControllerImpl, chatController.canSetMessageReminder(message: message) {
+            actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_ContextMenuRemindMe, icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Unmute"), color: theme.actionSheet.primaryTextColor)
+            }, action: { [weak chatController] c, _ in
+                guard let chatController else {
+                    return
+                }
+                c?.pushItems(items: chatController.messageReminderContextMenuItems(messageId: message.id)
+                |> map { items -> ContextController.Items in
+                    return ContextController.Items(content: .list(items))
+                })
+            })))
+        }
+        
         if data.messageActions.options.contains(.sendGift), !message.id.peerId.isTelegramNotifications {
             let sendGiftTitle: String
             var isIncoming = message.effectivelyIncoming(context.account.peerId)

@@ -693,6 +693,8 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
     
     private var selectionNode: ChatMessageSelectionNode?
     private var deliveryFailedNode: ChatMessageDeliveryFailedNode?
+    private var reminderBadgeNode: ASImageNode?
+    private var reminderBadgeTheme: PresentationTheme?
     private var swipeToReplyNode: ChatMessageSwipeToReplyNode?
     private var swipeToReplyFeedback: HapticFeedback?
     
@@ -4071,6 +4073,45 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
             animation.animator.updateAlpha(layer: deliveryFailedNode.layer, alpha: 0.0, completion: nil)
             animation.animator.updateFrame(layer: deliveryFailedNode.layer, frame: deliveryFailedNode.frame.offsetBy(dx: 24.0, dy: 0.0), completion: { [weak deliveryFailedNode] _ in
                 deliveryFailedNode?.removeFromSupernode()
+            })
+        }
+        
+        // "Remind me later" is pending for this message: a small bell sits on the bubble's outer top corner.
+        if item.associatedData.messageIdsWithReminders.contains(item.content.firstMessage.id) {
+            let reminderBadgeNode: ASImageNode
+            var isAppearing = false
+            if let current = strongSelf.reminderBadgeNode {
+                reminderBadgeNode = current
+            } else {
+                isAppearing = true
+                reminderBadgeNode = ASImageNode()
+                reminderBadgeNode.displaysAsynchronously = false
+                reminderBadgeNode.isUserInteractionEnabled = false
+                strongSelf.reminderBadgeNode = reminderBadgeNode
+                strongSelf.insertSubnode(reminderBadgeNode, belowSubnode: strongSelf.messageAccessibilityArea)
+            }
+            let theme = item.presentationData.theme.theme
+            if strongSelf.reminderBadgeTheme !== theme {
+                strongSelf.reminderBadgeTheme = theme
+                reminderBadgeNode.image = chatMessageReminderBadgeImage(theme: theme)
+            }
+            let badgeSize = reminderBadgeNode.image?.size ?? CGSize()
+            let badgeFrame = CGRect(origin: CGPoint(x: incoming ? (backgroundFrame.maxX - floor(badgeSize.width * 0.5) - 1.0) : (backgroundFrame.minX - floor(badgeSize.width * 0.5) + 1.0), y: backgroundFrame.minY - 6.0), size: badgeSize)
+            if isAppearing {
+                reminderBadgeNode.frame = badgeFrame
+                if case .System = animation {
+                    reminderBadgeNode.layer.animateSpring(from: 0.01 as NSNumber, to: 1.0 as NSNumber, keyPath: "transform.scale", duration: 0.5, damping: 70.0)
+                    reminderBadgeNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.15)
+                }
+            } else {
+                animation.animator.updateFrame(layer: reminderBadgeNode.layer, frame: badgeFrame, completion: nil)
+            }
+        } else if let reminderBadgeNode = strongSelf.reminderBadgeNode {
+            strongSelf.reminderBadgeNode = nil
+            strongSelf.reminderBadgeTheme = nil
+            animation.animator.updateAlpha(layer: reminderBadgeNode.layer, alpha: 0.0, completion: nil)
+            animation.animator.updateScale(layer: reminderBadgeNode.layer, scale: 0.01, completion: { [weak reminderBadgeNode] _ in
+                reminderBadgeNode?.removeFromSupernode()
             })
         }
         
@@ -8028,4 +8069,22 @@ public final class NameNavigateButton: HighlightableButton {
             self.titleTopicIconComponent = nil
         }
     }
+}
+
+private func chatMessageReminderBadgeImage(theme: PresentationTheme) -> UIImage? {
+    let glyph = UIImage(bundleImageName: "Chat/Context Menu/Unmute")
+    return generateImage(CGSize(width: 22.0, height: 22.0), rotatedContext: { size, context in
+        context.clear(CGRect(origin: CGPoint(), size: size))
+        context.setFillColor(theme.list.itemAccentColor.cgColor)
+        context.fillEllipse(in: CGRect(origin: CGPoint(), size: size))
+        if let glyph, let tinted = generateTintedImage(image: glyph, color: .white), let cgImage = tinted.cgImage {
+            let glyphRect = CGRect(x: 4.0, y: 4.0, width: 14.0, height: 14.0)
+            context.saveGState()
+            context.translateBy(x: glyphRect.midX, y: glyphRect.midY)
+            context.scaleBy(x: 1.0, y: -1.0)
+            context.translateBy(x: -glyphRect.midX, y: -glyphRect.midY)
+            context.draw(cgImage, in: glyphRect)
+            context.restoreGState()
+        }
+    })
 }
