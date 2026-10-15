@@ -27,6 +27,12 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
         let badgeTextNode: ImmediateTextNode
         let onlineNode: ASImageNode
         var item: Item?
+        var activated: (() -> Void)?
+
+        override func accessibilityActivate() -> Bool {
+            self.activated?()
+            return true
+        }
 
         override init() {
             self.avatarNode = AvatarNode(font: avatarPlaceholderFont(size: 24.0))
@@ -121,6 +127,9 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
             }
             if cellNode.item != item || themeUpdated {
                 cellNode.item = item
+                cellNode.activated = { [weak self] in
+                    self?.openPeer?(item.peer)
+                }
                 self.configure(cellNode: cellNode, item: item)
             }
         }
@@ -138,10 +147,14 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
 
     private func configure(cellNode: CellNode, item: Item) {
         let theme = self.presentationData.theme
-        cellNode.avatarNode.setPeer(context: self.context, theme: theme, peer: item.peer, displayDimensions: CGSize(width: ChatListPinchGridNode.avatarSize, height: ChatListPinchGridNode.avatarSize))
+        let isSavedMessages = item.peer.id == self.context.account.peerId
+        cellNode.avatarNode.setPeer(context: self.context, theme: theme, peer: item.peer, overrideImage: isSavedMessages ? .savedMessagesIcon : nil, displayDimensions: CGSize(width: ChatListPinchGridNode.avatarSize, height: ChatListPinchGridNode.avatarSize))
 
         let title = item.peer.id == self.context.account.peerId ? self.presentationData.strings.DialogList_SavedMessages : item.peer.compactDisplayTitle
         cellNode.titleNode.attributedText = NSAttributedString(string: title, font: Font.medium(12.0), textColor: theme.chatList.titleColor)
+        cellNode.isAccessibilityElement = true
+        cellNode.accessibilityLabel = title
+        cellNode.accessibilityTraits = .button
 
         if item.unreadCount > 0 {
             let background = item.isMuted ? theme.chatList.unreadBadgeInactiveBackgroundColor : theme.chatList.unreadBadgeActiveBackgroundColor
@@ -155,7 +168,7 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
             cellNode.badgeTextNode.isHidden = true
         }
 
-        if item.isOnline {
+        if item.isOnline && !isSavedMessages {
             cellNode.onlineNode.image = generateFilledCircleImage(diameter: 16.0, color: theme.chatList.onlineDotColor, strokeColor: theme.chatList.backgroundColor, strokeWidth: 2.5)
             cellNode.onlineNode.isHidden = false
         } else {
@@ -214,6 +227,7 @@ final class ChatListPinchGridNode: ASDisplayNode, UIScrollViewDelegate {
             let avatarSize = ChatListPinchGridNode.avatarSize
             cellNode.frame = CGRect(x: frame.midX - cellWidth * 0.5, y: frame.minY, width: cellWidth, height: avatarSize + 24.0)
             let scale = frame.width / avatarSize
+            cellNode.avatarNode.updateSize(size: CGSize(width: avatarSize, height: avatarSize))
             cellNode.avatarNode.bounds = CGRect(origin: CGPoint(), size: CGSize(width: avatarSize, height: avatarSize))
             cellNode.avatarNode.position = CGPoint(x: cellWidth * 0.5, y: frame.height * 0.5)
             cellNode.avatarNode.transform = CATransform3DMakeScale(scale, scale, 1.0)

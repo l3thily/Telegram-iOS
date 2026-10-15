@@ -115,6 +115,12 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
     private var enableAdjacentFilterLoading: Bool = false
     
     private var panRecognizer: InteractiveTransitionGestureRecognizer?
+
+    var pinchGridAlpha: CGFloat = 1.0 {
+        didSet {
+            self.alpha = self.pinchGridAlpha
+        }
+    }
     
     let leftSeparatorLayer: SimpleLayer
     
@@ -587,6 +593,14 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
         self.pendingItemNode?.2.dispose()
     }
     
+    public override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Two fingers on the list are a pinch into the chat grid, not a swipe between folders.
+        if gestureRecognizer === self.panRecognizer, gestureRecognizer.numberOfTouches > 1 {
+            return false
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
     public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         return false
     }
@@ -1054,7 +1068,7 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
         
         self._validLayoutReady.set(.single(true))
         
-        transition.updateAlpha(node: self, alpha: isReorderingFilters ? 0.5 : 1.0)
+        transition.updateAlpha(node: self, alpha: (isReorderingFilters ? 0.5 : 1.0) * self.pinchGridAlpha)
         self.isUserInteractionEnabled = !isReorderingFilters
         
         if let _ = inlineNavigationLocation {
@@ -1146,6 +1160,17 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
                     }
                 }
             }
+        }
+    }
+}
+
+private final class ChatListPinchGestureRecognizer: UIPinchGestureRecognizer {
+    var twoFingerTouchBegan: (() -> Void)?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        if (event.allTouches?.count ?? 0) > 1 {
+            self.twoFingerTouchBegan?()
         }
     }
 }
@@ -1365,7 +1390,13 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         self.view.addGestureRecognizer(tapRecognizer)
         tapRecognizer.isEnabled = false
 
-        self.view.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(self.pinchGesture(_:))))
+        // Recognized alongside the list's own pan, so a pinch is not swallowed by scrolling.
+        let pinchRecognizer = ChatListPinchGestureRecognizer(target: self, action: #selector(self.pinchGesture(_:)))
+        pinchRecognizer.twoFingerTouchBegan = { [weak self] in
+            self?.cancelPinchContextPreviews()
+        }
+        pinchRecognizer.delegate = self.wrappedGestureRecognizerDelegate
+        self.view.addGestureRecognizer(pinchRecognizer)
     }
 
     private func makePinchGridNode() -> ChatListPinchGridNode {
@@ -1377,7 +1408,7 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
             self?.mainContainerNode.currentItemNode.peerSelected?(peer, nil, true, true, nil)
         }
         gridNode.progressUpdated = { [weak self] progress in
-            self?.mainContainerNode.alpha = 1.0 - min(1.0, progress * 1.4)
+            self?.mainContainerNode.pinchGridAlpha = 1.0 - min(1.0, progress * 1.4)
         }
         self.insertSubnode(gridNode, aboveSubnode: self.mainContainerNode)
         self.pinchGridNode = gridNode
@@ -1399,8 +1430,20 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
     private func removePinchGrid() {
         self.pinchGridNode?.removeFromSupernode()
         self.pinchGridNode = nil
-        self.mainContainerNode.alpha = 1.0
+        self.mainContainerNode.pinchGridAlpha = 1.0
         self.mainContainerNode.currentItemNode.chatListViewUpdated = nil
+    }
+
+    private func cancelPinchContextPreviews() {
+        func cancelPreviews(in view: UIView) {
+            for gesture in view.gestureRecognizers ?? [] {
+                (gesture as? ContextGesture)?.cancel()
+            }
+            for subview in view.subviews {
+                cancelPreviews(in: subview)
+            }
+        }
+        cancelPreviews(in: self.mainContainerNode.view)
     }
 
     @objc private func pinchGesture(_ recognizer: UIPinchGestureRecognizer) {
@@ -1410,11 +1453,15 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                 recognizer.state = .cancelled
                 return
             }
+            // A row's context-preview timer can outlive pinch recognition and cancel all parent
+            // gestures when it fires. End those previews before starting the two-finger morph.
+            self.cancelPinchContextPreviews()
             let gridNode = self.makePinchGridNode()
             gridNode.stopAnimation()
             self.updatePinchGrid()
             self.pinchStartProgress = gridNode.progress
             gridNode.setProgress(gridNode.progress)
+            self.mainContainerNode.currentItemNode.scrollEnabled = false
         case .changed:
             guard let gridNode = self.pinchGridNode else {
                 return
@@ -1438,6 +1485,7 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                 target = gridNode.progress > 0.5 ? 1.0 : 0.0
             }
             ChatListControllerNode.isPinchGridEnabled = target == 1.0
+            self.mainContainerNode.currentItemNode.scrollEnabled = true
             gridNode.animateProgress(to: target, velocity: velocity, completion: { [weak self] in
                 if target == 0.0 {
                     self?.removePinchGrid()
@@ -1458,10 +1506,16 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
     }
     
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer is UIPinchGestureRecognizer {
+            return true
+        }
         return false
     }
     
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer is UIPinchGestureRecognizer {
+            return false
+        }
         if let _ = otherGestureRecognizer as? InteractiveTransitionGestureRecognizer {
             return false
         }
